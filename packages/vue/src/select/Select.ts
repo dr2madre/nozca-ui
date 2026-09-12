@@ -1,6 +1,7 @@
-import { defineComponent, h, type PropType } from "vue";
+import { defineComponent, h, ref, watch, type PropType } from "vue";
 import { Icon } from "../icon/Icon";
 import { useI18n } from "../i18n/i18n";
+import { useFormReset, useLiveDom } from "../internal/form-reset";
 import { useStableId } from "../internal/use-stable-id";
 
 export interface SelectItem {
@@ -77,27 +78,55 @@ export const Select = defineComponent({
     onValueChange: { type: Function as PropType<(value: string) => void>, default: undefined },
   },
   emits: {
-    "update:modelValue": (value: string) => typeof value === "string",
+    // The restore can put "nothing selected" back, so the model can be null.
+    "update:modelValue": (value: string | null) => value === null || typeof value === "string",
   },
   setup(props, { emit }) {
     const selectId = useStableId("ds-select");
     const errorId = `${selectId}-error`;
     const i18n = useI18n();
 
+    const control = ref<HTMLSelectElement | null>(null);
+    const given = () => (props.modelValue !== undefined ? props.modelValue : props.value);
+    // What the element shows. There is no machine here: the element is the
+    // state, and this is the component's own copy of it.
+    const shown = ref(given());
+    // The reset default follows the prop, except a give-back of what the
+    // control itself reported (ADR 0012).
+    const fallback = ref(given());
+    watch(given, (next) => {
+      if (next !== shown.value) fallback.value = next;
+      shown.value = next;
+    });
+
     const onChange = (event: Event) => {
       const next = (event.target as HTMLSelectElement).value;
       if (next === "") return;
+      shown.value = next;
       emit("update:modelValue", next);
       props.onValueChange?.(next);
     };
 
+    // The selected attribute carries the default, so a native reset and a
+    // no-script render both have one; the property carries the selection.
+    useLiveDom(control, () => ({ value: shown.value ?? "" }));
+    useFormReset(
+      () => control.value,
+      () => {
+        shown.value = fallback.value;
+        // The control's own copy of the value goes back too, which in Vue
+        // is the v-model binding. Not the change callback: a reset is not a
+        // user change (ADR 0012).
+        emit("update:modelValue", fallback.value);
+      },
+    );
+
     return () => {
       const { t } = i18n.value;
       const resolvedPlaceholder = props.placeholder ?? t("select.placeholder");
-      const selected = props.modelValue !== undefined ? props.modelValue : props.value;
+      const selected = shown.value;
       // The native element always has a selection; `""` stands for "nothing
       // yet" (the hidden, disabled placeholder option) and maps to `null`.
-      const nativeValue = selected ?? "";
 
       return h("div", { class: "select", "data-width": props.width }, [
         h(
@@ -114,6 +143,7 @@ export const Select = defineComponent({
             {
               class:
                 selected == null ? "select__native select__native--placeholder" : "select__native",
+              ref: control,
               id: selectId,
               name: props.name,
               disabled: props.disabled,
@@ -121,7 +151,8 @@ export const Select = defineComponent({
               "aria-invalid": props.error ? "true" : undefined,
               "aria-describedby": props.error ? errorId : undefined,
               "data-invalid": props.error ? "" : undefined,
-              value: nativeValue,
+              // No value here: a select's default is which option carries
+              // `selected`, and the property is written from the state.
               onChange,
             },
             [
@@ -130,7 +161,12 @@ export const Select = defineComponent({
               ...props.items.map((item) =>
                 h(
                   "option",
-                  { key: item.value, value: item.value, disabled: item.disabled },
+                  {
+                    key: item.value,
+                    value: item.value,
+                    disabled: item.disabled,
+                    selected: item.value === fallback.value,
+                  },
                   item.label ?? item.value,
                 ),
               ),
