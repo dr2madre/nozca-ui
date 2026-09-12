@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { VUE_BASE } from "../playwright.config";
 
 // The reset contract (ADR 0012) in a real browser, against a client-only
 // render: the docs site is server-rendered elsewhere, and SSR markup carries
@@ -117,4 +118,75 @@ test("a later listener's cancellation is honoured on a real click", async ({ pag
   await page.waitForTimeout(50);
   await expect(demo(page).getByRole("textbox", { name: "Name" })).toHaveValue("Grace");
   expect((await payload(page, "library-form")).name).toBe("Grace");
+});
+
+// Writing the value property on every render would collapse the selection to
+// the end of the field: the default has to travel as an attribute instead, so
+// that what the user is editing stays the browser's own.
+test("Vue: typing into the middle of a field keeps the caret there", async ({ page }) => {
+  await page.goto(VUE_BASE);
+  const field = page.getByRole("textbox", { name: "Reset name" });
+  await expect(field).toHaveValue("Ada");
+  await field.click();
+  const at = (index: number) =>
+    page.evaluate((i) => {
+      const el = document.querySelector(
+        '[data-testid="reset-form"] input[name="resetName"]',
+      ) as HTMLInputElement;
+      el.setSelectionRange(i, i);
+    }, index);
+  const caret = () =>
+    page.evaluate(() => {
+      const el = document.querySelector(
+        '[data-testid="reset-form"] input[name="resetName"]',
+      ) as HTMLInputElement;
+      return `${el.value}|${el.selectionStart}`;
+    });
+
+  await at(1);
+  await field.press("X");
+  expect(await caret(), "the first character landed at the caret").toBe("AXda|2");
+  // The second one is the one that catches a property written per render: the
+  // caret would be at the end by now.
+  await field.press("Y");
+  expect(await caret(), "and so did the next").toBe("AXYda|3");
+});
+
+// The Vue adapter's own surface, driven client-only in the harness. The same
+// three things together: payload, page, and callback silence.
+test("Vue: a reset restores payload and page, and reports nothing", async ({ page }) => {
+  await page.goto(VUE_BASE);
+  const form = page.getByTestId("reset-form");
+  await expect(form.getByRole("textbox", { name: "Reset name" })).toBeVisible();
+
+  const payload = () =>
+    page.evaluate(() => {
+      const host = document.querySelector('[data-testid="reset-form"]') as HTMLFormElement;
+      const data = new FormData(host);
+      return `${data.get("resetName")}|${data.get("resetFruit")}`;
+    });
+  const counts = async () =>
+    /Resets: (\d+)\. Reports: (\d+)\./
+      .exec((await page.getByTestId("reset-readout").textContent()) ?? "")!
+      .slice(1, 3)
+      .join("/");
+
+  expect(await payload()).toBe("Ada|pear");
+  expect(await counts()).toBe("0/0");
+
+  const name = form.getByRole("textbox", { name: "Reset name" });
+  await name.fill("Grace");
+  const fruit = form.getByRole("combobox", { name: "Reset fruit" });
+  await fruit.click();
+  await fruit.fill("App");
+  await page.getByRole("option", { name: /Apple/ }).click();
+  expect(await payload()).toBe("Grace|apple");
+  const reported = (await counts()).split("/")[1];
+  expect(Number(reported)).toBeGreaterThan(0);
+
+  await form.getByRole("button", { name: "Reset the form" }).click();
+  await page.waitForTimeout(50);
+  expect(await payload(), "the whole form is back").toBe("Ada|pear");
+  await expect(name).toHaveValue("Ada");
+  expect(await counts(), "one reset seen, no new report").toBe(`1/${reported}`);
 });

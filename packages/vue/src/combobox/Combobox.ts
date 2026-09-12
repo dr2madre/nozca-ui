@@ -1,9 +1,10 @@
-import { defineComponent, h, ref, type PropType, type VNode } from "vue";
+import { defineComponent, h, ref, watch, type PropType, type VNode } from "vue";
 import { Icon } from "../icon/Icon";
 import { useI18n } from "../i18n/i18n";
 import { useHydratedTeleport } from "../internal/use-hydrated-teleport";
 import { scopedTeleport } from "../internal/locale-teleport";
 import { useCombobox, type ComboboxItem } from "./use-combobox";
+import { useFormReset } from "../internal/form-reset";
 
 /** A combobox option, optionally carrying a leading icon (an SVG path `d`). */
 export interface ComboboxOption extends ComboboxItem {
@@ -96,14 +97,27 @@ export const Combobox = defineComponent({
     const teleportDisabled = useHydratedTeleport();
     const i18n = useI18n();
 
+    const given = () => (props.modelValue !== undefined ? props.modelValue : props.value);
+    // What the composable is told: a reset writes the default here, which is
+    // its silent path (the watch, not the setter).
+    const told = ref(given());
+    // The reset default follows the prop, except a give-back of what the
+    // control itself reported (ADR 0012).
+    const fallback = ref(given());
+    watch(given, (next) => {
+      if (next !== told.value) fallback.value = next;
+      told.value = next;
+    });
+
     const combobox = useCombobox(() => ({
       items: props.items,
-      value: props.modelValue !== undefined ? props.modelValue : props.value,
+      value: told.value,
       disabled: props.disabled,
       // Select-only mode never filters: the read-only input is a trigger, so
       // the list must always show every option (keyboard opening included).
       filter: props.searchable ? undefined : (all: ComboboxItem[]) => all,
       onValueChange: (next: string | null) => {
+        told.value = next;
         emit("update:modelValue", next);
         props.onValueChange?.(next);
       },
@@ -125,6 +139,21 @@ export const Combobox = defineComponent({
       openAll,
       setOpen,
     } = combobox;
+
+    useFormReset(
+      () => inputRef.value,
+      () => {
+        told.value = fallback.value;
+        // The composable's own silent restore: its value watch returns early
+        // when the value is unchanged, which would leave the typed text and
+        // the open list standing.
+        combobox.reset(fallback.value);
+        // The control's own copy of the value goes back too, which in Vue
+        // is the v-model binding. Not the change callback: a reset is not a
+        // user change (ADR 0012).
+        emit("update:modelValue", fallback.value);
+      },
+    );
 
     // The chevron toggles the list (showing all options when opening), so a
     // selected value can be changed without clearing it first. iOS Safari can

@@ -1,6 +1,7 @@
-import { defineComponent, h, ref, type PropType } from "vue";
+import { defineComponent, h, ref, watch, type PropType } from "vue";
 import { Icon } from "../icon/Icon";
 import { useRatingGroup } from "./use-rating-group";
+import { useFormReset, useLiveChecked } from "../internal/form-reset";
 import { useI18n } from "../i18n/i18n";
 import { useStableId } from "../internal/use-stable-id";
 
@@ -48,7 +49,8 @@ export const RatingGroup = defineComponent({
     onValueChange: { type: Function as PropType<(value: number) => void>, default: undefined },
   },
   emits: {
-    "update:modelValue": (value: number) => typeof value === "number",
+    // The restore can put "nothing rated" back, so the model can be null.
+    "update:modelValue": (value: number | null) => value === null || typeof value === "number",
   },
   setup(props, { emit }) {
     const labelId = useStableId("ds-rating-label");
@@ -56,22 +58,54 @@ export const RatingGroup = defineComponent({
     // selected stars show the selection color.
     const hovered = ref(0);
 
+    const root = ref<HTMLElement | null>(null);
+    const given = () => (props.modelValue !== undefined ? props.modelValue : props.value);
+    // What the composable is told: a reset writes the default here, which is
+    // its silent path (the watch, not the setter).
+    const told = ref(given());
+    // The reset default follows the prop, except a give-back of what the
+    // control itself reported (ADR 0012).
+    const fallback = ref(given());
+    watch(given, (next) => {
+      if (next !== told.value) fallback.value = next;
+      told.value = next;
+    });
+
     const { items, api, value } = useRatingGroup(() => ({
       max: props.max,
-      value: props.modelValue !== undefined ? props.modelValue : props.value,
+      value: told.value,
       disabled: props.disabled,
       name: props.name,
       onValueChange: (next: number) => {
+        told.value = next;
         emit("update:modelValue", next);
         props.onValueChange?.(next);
       },
     }));
 
+    useFormReset(
+      () => root.value,
+      () => {
+        told.value = fallback.value;
+        // The control's own copy of the value goes back too, which in Vue
+        // is the v-model binding. Not the change callback: a reset is not a
+        // user change (ADR 0012).
+        emit("update:modelValue", fallback.value);
+      },
+    );
+
+    // The attributes are the defaults; the properties follow the state.
+    useLiveChecked(
+      root,
+      () => value.value,
+      (item) => items.value.some((entry) => entry.value === item && entry.position === value.value),
+    );
+
     const i18n = useI18n();
     const starLabel = (position: number) => i18n.value.t("rating.stars", { count: position });
 
     return () =>
-      h("div", { class: "rating-field" }, [
+      h("div", { class: "rating-field", ref: root }, [
         h("span", { class: "rating__label", id: labelId }, props.label),
         h(
           "div",
@@ -101,7 +135,7 @@ export const RatingGroup = defineComponent({
                 h("input", {
                   ...api.value.getItemProps(item.value),
                   class: "rating__input",
-                  checked: value.value === item.position,
+                  "^checked": fallback.value === item.position ? "" : undefined,
                   "aria-label": starLabel(item.position),
                 }),
                 h(Icon, { size: "var(--ds-rating-size, 1.5rem)" }, () => [
