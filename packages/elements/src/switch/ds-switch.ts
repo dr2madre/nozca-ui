@@ -1,5 +1,6 @@
 import { switchControl as core } from "@design-system/core";
 import { applyProps, boolAttr, emit, HTMLElementBase, upgradeProperty } from "../internal/base";
+import { watchFormReset } from "../internal/form-reset";
 
 /**
  * `<ds-switch>` — the styled switch as a custom element.
@@ -29,11 +30,26 @@ export class DsSwitch extends HTMLElementBase {
   #input: HTMLInputElement | null = null;
   #track: HTMLSpanElement | null = null;
   #text: HTMLSpanElement | null = null;
+  /** What a form reset restores: the last state set from outside. */
+  #defaultChecked = false;
+  /** The last state this control reported, so giving it back is not a change. */
+  #reported: boolean | null = null;
+  #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
     upgradeProperty(this, "checked");
     if (!this.#input) this.#render();
     this.#sync();
+    this.#stopFormReset ??= watchFormReset(
+      this,
+      () => this.#input,
+      () => this.#restore(),
+    );
+  }
+
+  disconnectedCallback() {
+    this.#stopFormReset?.();
+    this.#stopFormReset = null;
   }
 
   attributeChangedCallback() {
@@ -70,9 +86,19 @@ export class DsSwitch extends HTMLElementBase {
     this.#text = text;
   }
 
+  /** Put the state back to the current default, telling nobody. */
+  #restore() {
+    this.#reported = this.#defaultChecked;
+    this.checked = this.#defaultChecked;
+    this.#sync();
+  }
+
   #sync() {
     const input = this.#input!;
     const disabled = boolAttr(this, "disabled");
+    // The default a reset restores follows the attribute, except when it only
+    // hands back what this control itself reported.
+    if (this.checked !== this.#reported) this.#defaultChecked = this.checked;
     input.closest("label")?.classList.toggle("field--disabled", disabled);
 
     const name = this.getAttribute("name");
@@ -101,6 +127,7 @@ export class DsSwitch extends HTMLElementBase {
     const api = core.connect({
       state: { checked: this.checked, disabled },
       setChecked: (next) => {
+        this.#reported = next;
         this.checked = next;
         emit(this, "change", { checked: next });
       },
@@ -108,5 +135,8 @@ export class DsSwitch extends HTMLElementBase {
 
     applyProps(input, api.rootProps);
     input.checked = api.checked;
+    // The real DOM default, so the browser's own reset works and so does one
+    // in markup the script never reaches.
+    input.defaultChecked = this.#defaultChecked;
   }
 }

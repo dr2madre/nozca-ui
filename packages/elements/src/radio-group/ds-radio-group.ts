@@ -7,6 +7,7 @@ import {
   nextId,
   upgradeProperty,
 } from "../internal/base";
+import { watchFormReset } from "../internal/form-reset";
 
 /** A radio in the group. The label is what the item shows. */
 export type RadioGroupItem = core.RadioItem & { label: string };
@@ -46,12 +47,27 @@ export class DsRadioGroup extends HTMLElementBase {
   #itemsAssigned = false;
   #inputs = new Map<string, HTMLInputElement>();
   #labelId = nextId("ds-radio-group-label");
+  /** What a form reset restores: the last value set from outside. */
+  #defaultValue: string | null = null;
+  /** The last value this control reported, so giving it back is not a change. */
+  #reported: string | null | undefined = undefined;
+  #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
     upgradeProperty(this, "value");
     upgradeProperty(this, "items");
     if (!this.#group) this.#render();
     this.#sync();
+    this.#stopFormReset ??= watchFormReset(
+      this,
+      () => this.#inputs.values().next().value ?? null,
+      () => this.#restore(),
+    );
+  }
+
+  disconnectedCallback() {
+    this.#stopFormReset?.();
+    this.#stopFormReset = null;
   }
 
   attributeChangedCallback() {
@@ -140,9 +156,19 @@ export class DsRadioGroup extends HTMLElementBase {
     }
   }
 
+  /** Put the value back to the current default, telling nobody. */
+  #restore() {
+    this.#reported = this.#defaultValue;
+    this.value = this.#defaultValue;
+    this.#sync();
+  }
+
   #sync() {
     const group = this.#group!;
     const disabled = boolAttr(this, "disabled");
+    // The default a reset restores follows the attribute, except when it only
+    // hands back what this control itself reported.
+    if (this.value !== this.#reported) this.#defaultValue = this.value;
     const orientation =
       this.getAttribute("orientation") === "horizontal" ? "horizontal" : "vertical";
 
@@ -157,6 +183,7 @@ export class DsRadioGroup extends HTMLElementBase {
       }),
       name: this.getAttribute("name") ?? undefined,
       setValue: (next) => {
+        this.#reported = next;
         this.value = next;
         emit(this, "change", { value: next });
       },
@@ -170,6 +197,9 @@ export class DsRadioGroup extends HTMLElementBase {
       const input = this.#inputs.get(item.value)!;
       applyProps(input, api.getItemProps(item.value));
       input.checked = api.value === item.value;
+      // The real DOM default, so the browser's own reset works and so does one
+      // in markup the script never reaches.
+      input.defaultChecked = this.#defaultValue === item.value;
       input.closest("label")?.classList.toggle("radio--disabled", disabled || !!item.disabled);
     }
   }

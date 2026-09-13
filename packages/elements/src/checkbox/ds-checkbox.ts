@@ -7,6 +7,7 @@ import {
   HTMLElementBase,
   upgradeProperty,
 } from "../internal/base";
+import { watchFormReset } from "../internal/form-reset";
 import { checkIcon, dashIcon } from "../internal/icons";
 
 /**
@@ -36,11 +37,26 @@ export class DsCheckbox extends HTMLElementBase {
 
   #input: HTMLInputElement | null = null;
   #text: HTMLSpanElement | null = null;
+  /** What a form reset restores: the last state set from outside. */
+  #defaultChecked: core.CheckedState = false;
+  /** The last state this control reported, so giving it back is not a change. */
+  #reported: core.CheckedState | null = null;
+  #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
     upgradeProperty(this, "checked");
     if (!this.#input) this.#render();
     this.#sync();
+    this.#stopFormReset ??= watchFormReset(
+      this,
+      () => this.#input,
+      () => this.#restore(),
+    );
+  }
+
+  disconnectedCallback() {
+    this.#stopFormReset?.();
+    this.#stopFormReset = null;
   }
 
   attributeChangedCallback() {
@@ -83,9 +99,19 @@ export class DsCheckbox extends HTMLElementBase {
     this.#text = text;
   }
 
+  /** Put the state back to the current default, telling nobody. */
+  #restore() {
+    this.#reported = this.#defaultChecked;
+    this.checked = this.#defaultChecked;
+    this.#sync();
+  }
+
   #sync() {
     const input = this.#input!;
     const disabled = boolAttr(this, "disabled");
+    // The default a reset restores follows the attributes, except when they
+    // only hand back what this control itself reported.
+    if (this.checked !== this.#reported) this.#defaultChecked = this.checked;
     input.closest("label")?.classList.toggle("field--disabled", disabled);
 
     for (const attr of ["name", "value"] as const) {
@@ -99,6 +125,7 @@ export class DsCheckbox extends HTMLElementBase {
     const api = core.connect({
       state: { checked: this.checked, disabled },
       setChecked: (next) => {
+        this.#reported = next;
         this.checked = next;
         emit(this, "change", { checked: next });
       },
@@ -107,5 +134,8 @@ export class DsCheckbox extends HTMLElementBase {
     applyProps(input, api.rootProps);
     applyDomProps(input, api.rootDomProps);
     input.checked = api.checked === true;
+    // The real DOM default, so the browser's own reset works and so does one
+    // in markup the script never reaches.
+    input.defaultChecked = this.#defaultChecked === true;
   }
 }

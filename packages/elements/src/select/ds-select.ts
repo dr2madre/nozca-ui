@@ -1,4 +1,5 @@
 import { boolAttr, emit, HTMLElementBase, nextId, upgradeProperty } from "../internal/base";
+import { watchFormReset } from "../internal/form-reset";
 import { chevronIcon } from "../internal/icons";
 
 export interface SelectItem {
@@ -47,12 +48,27 @@ export class DsSelect extends HTMLElementBase {
   #errorId = nextId("ds-select-error");
   #items: SelectItem[] = [];
   #itemsAssigned = false;
+  /** What a form reset restores: the last value set from outside. */
+  #defaultValue: string | null = null;
+  /** The last value this control reported, so giving it back is not a change. */
+  #reported: string | null | undefined = undefined;
+  #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
     upgradeProperty(this, "value");
     upgradeProperty(this, "items");
     if (!this.#select) this.#render();
     this.#sync();
+    this.#stopFormReset ??= watchFormReset(
+      this,
+      () => this.#select,
+      () => this.#restore(),
+    );
+  }
+
+  disconnectedCallback() {
+    this.#stopFormReset?.();
+    this.#stopFormReset = null;
   }
 
   attributeChangedCallback() {
@@ -114,6 +130,7 @@ export class DsSelect extends HTMLElementBase {
       event.stopPropagation();
       const next = select.value;
       if (next === "") return;
+      this.#reported = next;
       this.value = next;
       emit(this, "change", { value: next });
     });
@@ -165,9 +182,19 @@ export class DsSelect extends HTMLElementBase {
     }
   }
 
+  /** Put the value back to the current default, telling nobody. */
+  #restore() {
+    this.#reported = this.#defaultValue;
+    this.value = this.#defaultValue;
+    this.#sync();
+  }
+
   #sync() {
     const select = this.#select!;
     select.disabled = boolAttr(this, "disabled");
+    // The default a reset restores follows the attribute, except when it only
+    // hands back what this control itself reported.
+    if (this.value !== this.#reported) this.#defaultValue = this.value;
 
     this.#root!.dataset.width = this.getAttribute("width") ?? "wrap";
     this.#label!.textContent = this.getAttribute("label") ?? "";
@@ -185,6 +212,11 @@ export class DsSelect extends HTMLElementBase {
 
     select.value = this.value ?? "";
     select.classList.toggle("select__native--placeholder", this.value == null);
+    // The real DOM default, so the browser's own reset works and so does one
+    // in markup the script never reaches. The placeholder is never a default:
+    // a form with no selection sends nothing for this control.
+    for (const option of select.options)
+      option.defaultSelected = option.value === this.#defaultValue;
 
     const error = this.getAttribute("error");
     if (error) {
