@@ -49,8 +49,6 @@ export class DsRadioGroup extends HTMLElementBase {
   #labelId = nextId("ds-radio-group-label");
   /** What a form reset restores: the last value set from outside. */
   #defaultValue: string | null = null;
-  /** The last value this control reported, so giving it back is not a change. */
-  #reported: string | null | undefined = undefined;
   #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
@@ -158,8 +156,9 @@ export class DsRadioGroup extends HTMLElementBase {
 
   /** Put the value back to the current default, telling nobody. */
   #restore() {
-    this.#reported = this.#defaultValue;
-    this.value = this.#defaultValue;
+    const restored = this.#defaultValue;
+    for (const [value, input] of this.#inputs) input.checked = value === restored;
+    this.value = restored;
     this.#sync();
   }
 
@@ -167,8 +166,10 @@ export class DsRadioGroup extends HTMLElementBase {
     const group = this.#group!;
     const disabled = boolAttr(this, "disabled");
     // The default a reset restores follows the attribute, except when it only
-    // hands back what this control itself reported.
-    if (this.value !== this.#reported) this.#defaultValue = this.value;
+    // hands back what the control already shows: that is the page echoing a
+    // choice, and an echo is not a new default (ADR 0012).
+    const shown = [...this.#inputs].find(([, input]) => input.checked)?.[0] ?? null;
+    if (this.value !== shown) this.#defaultValue = this.value;
     const orientation =
       this.getAttribute("orientation") === "horizontal" ? "horizontal" : "vertical";
 
@@ -183,7 +184,6 @@ export class DsRadioGroup extends HTMLElementBase {
       }),
       name: this.getAttribute("name") ?? undefined,
       setValue: (next) => {
-        this.#reported = next;
         this.value = next;
         emit(this, "change", { value: next });
       },

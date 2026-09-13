@@ -39,8 +39,8 @@ export class DsCheckbox extends HTMLElementBase {
   #text: HTMLSpanElement | null = null;
   /** What a form reset restores: the last state set from outside. */
   #defaultChecked: core.CheckedState = false;
-  /** The last state this control reported, so giving it back is not a change. */
-  #reported: core.CheckedState | null = null;
+  /** Set while the two state attributes are written as one change. */
+  #writing = false;
   #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
@@ -60,7 +60,10 @@ export class DsCheckbox extends HTMLElementBase {
   }
 
   attributeChangedCallback() {
-    if (this.#input) this.#sync();
+    // `checked` and `indeterminate` are two attributes holding one state, so
+    // the sync waits for both: halfway through, the element is in a state
+    // nobody asked for.
+    if (this.#input && !this.#writing) this.#sync();
   }
 
   get checked(): core.CheckedState {
@@ -68,8 +71,11 @@ export class DsCheckbox extends HTMLElementBase {
     return boolAttr(this, "checked");
   }
   set checked(value: core.CheckedState) {
+    this.#writing = true;
     this.toggleAttribute("indeterminate", value === "indeterminate");
     this.toggleAttribute("checked", value === true);
+    this.#writing = false;
+    if (this.#input) this.#sync();
   }
 
   #render() {
@@ -101,8 +107,13 @@ export class DsCheckbox extends HTMLElementBase {
 
   /** Put the state back to the current default, telling nobody. */
   #restore() {
-    this.#reported = this.#defaultChecked;
-    this.checked = this.#defaultChecked;
+    const restored = this.#defaultChecked;
+    const input = this.#input;
+    if (input) {
+      input.checked = restored === true;
+      input.indeterminate = restored === "indeterminate";
+    }
+    this.checked = restored;
     this.#sync();
   }
 
@@ -110,8 +121,10 @@ export class DsCheckbox extends HTMLElementBase {
     const input = this.#input!;
     const disabled = boolAttr(this, "disabled");
     // The default a reset restores follows the attributes, except when they
-    // only hand back what this control itself reported.
-    if (this.checked !== this.#reported) this.#defaultChecked = this.checked;
+    // only hand back what the control already shows: that is the page echoing
+    // a click, and an echo is not a new default (ADR 0012).
+    const shown: core.CheckedState = input.indeterminate ? "indeterminate" : input.checked;
+    if (this.checked !== shown) this.#defaultChecked = this.checked;
     input.closest("label")?.classList.toggle("field--disabled", disabled);
 
     for (const attr of ["name", "value"] as const) {
@@ -125,7 +138,6 @@ export class DsCheckbox extends HTMLElementBase {
     const api = core.connect({
       state: { checked: this.checked, disabled },
       setChecked: (next) => {
-        this.#reported = next;
         this.checked = next;
         emit(this, "change", { checked: next });
       },

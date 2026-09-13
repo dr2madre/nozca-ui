@@ -41,8 +41,6 @@ abstract class DsTextControl extends HTMLElementBase {
   #fieldId: string | null = null;
   /** What a form reset restores: the last value set from outside. */
   #defaultValue = "";
-  /** The last value this control reported, so giving it back is not a change. */
-  #reported: string | null = null;
   #stopFormReset: (() => void) | null = null;
 
   /** The control element this field wraps. */
@@ -78,8 +76,10 @@ abstract class DsTextControl extends HTMLElementBase {
     return this.#control?.value ?? this.getAttribute("value") ?? "";
   }
   set value(next: string) {
-    if (this.#control) this.#control.value = next;
+    // The attribute first: the sync that follows compares it against what the
+    // control holds, and writing the control first would look like an echo.
     this.setAttribute("value", next);
+    if (this.#control) this.#control.value = next;
   }
 
   #render() {
@@ -92,12 +92,12 @@ abstract class DsTextControl extends HTMLElementBase {
     const control = this.createControl();
     control.className = "field__control";
     control.value = this.getAttribute("value") ?? "";
+    this.#defaultValue = control.value;
     // The host re-emits a CustomEvent with a typed detail; stop the native
     // events here so listeners on the host don't receive them twice.
     for (const type of ["input", "change"] as const) {
       control.addEventListener(type, (event) => {
         event.stopPropagation();
-        this.#reported = control.value;
         this.setAttribute("value", control.value);
         emit(this, type, { value: control.value });
       });
@@ -130,8 +130,9 @@ abstract class DsTextControl extends HTMLElementBase {
     const readOnly = boolAttr(this, "readonly");
     const value = this.getAttribute("value") ?? "";
     // The default a reset restores follows the attribute, except when the
-    // attribute is only handing back what this control itself reported.
-    if (value !== this.#reported) this.#defaultValue = value;
+    // attribute only hands back what the control already holds: that is the
+    // page echoing an edit, and an echo is not a new default (ADR 0012).
+    if (value !== control.value) this.#defaultValue = value;
 
     root.classList.toggle(`${this.rootClass}--disabled`, disabled);
     root.classList.toggle(`${this.rootClass}--success`, Boolean(success) && !error);
@@ -197,8 +198,9 @@ abstract class DsTextControl extends HTMLElementBase {
 
   /** Put the value back to the current default, telling nobody. */
   #restore() {
-    this.#reported = this.#defaultValue;
-    this.setAttribute("value", this.#defaultValue);
+    const restored = this.#defaultValue;
+    if (this.#control) this.#control.value = restored;
+    this.setAttribute("value", restored);
     this.#sync();
   }
 

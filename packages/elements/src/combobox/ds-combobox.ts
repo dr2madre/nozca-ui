@@ -58,8 +58,6 @@ export class DsCombobox extends HTMLElementBase {
   #hidden: HTMLInputElement | null = null;
   /** What a form reset restores: the last value set from outside. */
   #defaultValue: string | null = null;
-  /** The last value this control reported, so giving it back is not a change. */
-  #reported: string | null | undefined = undefined;
   #stopFormReset: (() => void) | null = null;
   #root: HTMLDivElement | null = null;
   #label: HTMLLabelElement | null = null;
@@ -164,6 +162,8 @@ export class DsCombobox extends HTMLElementBase {
       activeValue: null,
       items: this.#filter(""),
     };
+    // The markup's value is the first default a reset can restore.
+    this.#defaultValue = this.getAttribute("value");
     this.#id = core.initialState({ items: this.#all }).id;
 
     const root = document.createElement("div");
@@ -300,7 +300,8 @@ export class DsCombobox extends HTMLElementBase {
         // next time the element reconnected.
         const item = value == null ? undefined : this.#all.find((i) => i.value === value);
         const text = item ? labelOf(item) : "";
-        this.#reported = value;
+        // State first, then the attribute: the sync that follows compares the
+        // two, and an attribute that matches the state is an echo.
         this.#update({ value, inputValue: text, committedInputValue: text });
         if (value == null) this.removeAttribute("value");
         else this.setAttribute("value", value);
@@ -478,7 +479,6 @@ export class DsCombobox extends HTMLElementBase {
     const value = this.#defaultValue;
     const item = value == null ? undefined : this.#all.find((i) => i.value === value);
     const text = item ? labelOf(item) : "";
-    this.#reported = value;
     if (value == null) this.removeAttribute("value");
     else this.setAttribute("value", value);
     this.#update({
@@ -493,8 +493,9 @@ export class DsCombobox extends HTMLElementBase {
 
     const attr = this.getAttribute("value");
     // The default a reset restores follows the attribute, except when it only
-    // hands back what this control itself reported.
-    if (attr !== this.#reported) this.#defaultValue = attr;
+    // hands back what the control already holds: that is the page echoing a
+    // selection, and an echo is not a new default (ADR 0012).
+    if (attr !== this.#state.value) this.#defaultValue = attr;
     if (attr !== this.#state.value) {
       const item = this.#all.find((i) => i.value === attr);
       this.#update({

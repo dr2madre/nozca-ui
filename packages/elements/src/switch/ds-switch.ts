@@ -32,8 +32,6 @@ export class DsSwitch extends HTMLElementBase {
   #text: HTMLSpanElement | null = null;
   /** What a form reset restores: the last state set from outside. */
   #defaultChecked = false;
-  /** The last state this control reported, so giving it back is not a change. */
-  #reported: boolean | null = null;
   #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
@@ -88,8 +86,9 @@ export class DsSwitch extends HTMLElementBase {
 
   /** Put the state back to the current default, telling nobody. */
   #restore() {
-    this.#reported = this.#defaultChecked;
-    this.checked = this.#defaultChecked;
+    const restored = this.#defaultChecked;
+    if (this.#input) this.#input.checked = restored;
+    this.checked = restored;
     this.#sync();
   }
 
@@ -97,8 +96,9 @@ export class DsSwitch extends HTMLElementBase {
     const input = this.#input!;
     const disabled = boolAttr(this, "disabled");
     // The default a reset restores follows the attribute, except when it only
-    // hands back what this control itself reported.
-    if (this.checked !== this.#reported) this.#defaultChecked = this.checked;
+    // hands back what the control already shows: that is the page echoing a
+    // click, and an echo is not a new default (ADR 0012).
+    if (this.checked !== input.checked) this.#defaultChecked = this.checked;
     input.closest("label")?.classList.toggle("field--disabled", disabled);
 
     const name = this.getAttribute("name");
@@ -127,7 +127,6 @@ export class DsSwitch extends HTMLElementBase {
     const api = core.connect({
       state: { checked: this.checked, disabled },
       setChecked: (next) => {
-        this.#reported = next;
         this.checked = next;
         emit(this, "change", { checked: next });
       },

@@ -102,8 +102,8 @@ const CONTROLS: Row[] = [
     edit: async (user) => user.click(screen.getByRole("checkbox", { name: "F" })),
     edited: "on",
     restored: null,
-    adopt: (host) => host.setAttribute("checked", ""),
-    adopted: "on",
+    adopt: (host) => host.removeAttribute("checked"),
+    adopted: "",
     giveBack: (host) => host.setAttribute("checked", ""),
     editedAsDefault: "on",
     visible: () =>
@@ -120,11 +120,33 @@ const CONTROLS: Row[] = [
     edit: async (user) => user.click(screen.getByRole("switch", { name: "F" })),
     edited: null,
     restored: "on",
-    adopt: (host) => host.removeAttribute("checked"),
-    adopted: "",
-    giveBack: (host) => host.removeAttribute("checked"),
+    adopt: (host) => host.setAttribute("checked", ""),
+    adopted: "on",
+    // Through the property: the edit already took the attribute off, so
+    // removing it again would change nothing and prove nothing.
+    giveBack: (host) => ((host as unknown as { checked: boolean }).checked = false),
     editedAsDefault: "",
     visible: () => String((screen.getByRole("switch", { name: "F" }) as HTMLInputElement).checked),
+    restoredVisible: "true",
+    ownCopy: (host) => String((host as unknown as { checked: unknown }).checked),
+    restoredOwnCopy: "true",
+  },
+  {
+    name: "<ds-checkbox> that starts on",
+    markup: `<ds-checkbox label="F" name="f" value="on" checked></ds-checkbox>`,
+    domDefault: () => defaultsOf("input[type=checkbox]", "defaultChecked"),
+    wants: "on",
+    edit: async (user) => user.click(screen.getByRole("checkbox", { name: "F" })),
+    edited: null,
+    restored: "on",
+    adopt: (host) => host.setAttribute("checked", ""),
+    adopted: "on",
+    // Through the property: the edit already took the attribute off, so
+    // removing it again would change nothing and prove nothing.
+    giveBack: (host) => ((host as unknown as { checked: unknown }).checked = false),
+    editedAsDefault: "",
+    visible: () =>
+      String((screen.getByRole("checkbox", { name: "F" }) as HTMLInputElement).checked),
     restoredVisible: "true",
     ownCopy: (host) => String((host as unknown as { checked: unknown }).checked),
     restoredOwnCopy: "true",
@@ -139,8 +161,8 @@ const CONTROLS: Row[] = [
     edit: async (user) => user.selectOptions(screen.getByRole("combobox", { name: "F" }), "apple"),
     edited: "apple",
     restored: "pear",
-    adopt: (host) => host.setAttribute("value", "apple"),
-    adopted: "apple",
+    adopt: (host) => host.setAttribute("value", "pear"),
+    adopted: "pear",
     giveBack: (host) => host.setAttribute("value", "apple"),
     editedAsDefault: "apple",
     visible: () => (screen.getByRole("combobox", { name: "F" }) as HTMLSelectElement).value,
@@ -156,8 +178,8 @@ const CONTROLS: Row[] = [
     edit: async (user) => user.click(screen.getByRole("radio", { name: "Pear" })),
     edited: "pear",
     restored: "apple",
-    adopt: (host) => host.setAttribute("value", "pear"),
-    adopted: "pear",
+    adopt: (host) => host.setAttribute("value", "apple"),
+    adopted: "apple",
     giveBack: (host) => host.setAttribute("value", "pear"),
     editedAsDefault: "pear",
     visible: () =>
@@ -177,8 +199,8 @@ const CONTROLS: Row[] = [
     edit: async (user) => user.click(screen.getByRole("checkbox", { name: "Pear" })),
     edited: "apple,pear",
     restored: "apple",
-    adopt: (host) => host.setAttribute("value", "apple,pear"),
-    adopted: "apple,pear",
+    adopt: (host) => host.setAttribute("value", "pear"),
+    adopted: "pear",
     giveBack: (host) => host.setAttribute("value", "apple,pear"),
     editedAsDefault: "apple,pear",
     visible: () =>
@@ -268,33 +290,40 @@ describe.each(CONTROLS)("form reset restores $name", (entry) => {
     try {
       // Deltas, not totals: replacing the page's markup tears down whatever
       // the previous test left behind, and that removal is not this one's.
-      const before = resets(removed);
       const { host } = mount(entry.markup);
       const mounted = { added: resets(added), removed: resets(removed) };
       expect(mounted.added, "the control must listen while it is in the page").toBe(1);
       host.remove();
       expect(resets(removed) - mounted.removed, "the listener outlived the control").toBe(1);
-      expect(mounted.removed).toBeGreaterThanOrEqual(before);
     } finally {
       added.mockRestore();
       removed.mockRestore();
     }
   });
 
-  it("answers again after being moved", async () => {
+  it("follows the form it is in now, not the one it started in", async () => {
     const user = userEvent.setup();
     const { form, host } = mount(entry.markup);
+    const second = document.createElement("form");
+    second.dataset.testid = "second";
+    document.body.appendChild(second);
 
-    // Out and back in: the listener went with the removal, so it has to be
-    // set up again, and the control still follows the form it is in now.
+    // Moved into another form: the listener went with the removal and is set
+    // up again on the way in, and the owner is read when the reset happens.
     host.remove();
-    form.insertBefore(host, form.firstChild);
+    second.appendChild(host);
 
     await entry.edit(user);
-    expect(payload(form)).toBe(entry.edited);
+    expect(payload(second)).toBe(entry.edited);
+
+    // The form it left must not be able to restore it any more.
     form.reset();
     await settled();
-    expect(payload(form), "a control that was moved stopped answering").toBe(entry.restored);
+    expect(payload(second), "the old form still moved the control").toBe(entry.edited);
+
+    second.reset();
+    await settled();
+    expect(payload(second), "the control ignored the form it is in now").toBe(entry.restored);
   });
 });
 
@@ -383,5 +412,145 @@ describe("form reset restores the composite families", () => {
     form.reset();
     await settled();
     expect(payload(form), "a value the page chose is the new default").toBe("apple,pear");
+  });
+});
+
+// Four ways the current default went wrong before, each found by review and
+// each reproduced here first. They are about paths the table above does not
+// walk: a second write from the page, a control with a state no attribute can
+// hold, an option list rebuilt under a live selection, and a query left in the
+// box after the selection came back.
+describe("the current default under a page that keeps writing", () => {
+  it("takes a value the page sets after another one as its own choice", async () => {
+    const user = userEvent.setup();
+    const { form, host } = mount(`<ds-text-field label="F" name="f" value="Ada"></ds-text-field>`);
+    const input = screen.getByRole("textbox", { name: "F" });
+
+    await user.clear(input);
+    await user.type(input, "Grace");
+    // The page changes its mind twice. The second write lands on the value the
+    // user typed, but the control no longer holds "Grace": it holds "Hopper",
+    // which the page itself put there, so this is a choice and not an echo.
+    host.setAttribute("value", "Hopper");
+    host.setAttribute("value", "Grace");
+
+    form.reset();
+    await settled();
+    expect(payload(form)).toBe("Grace");
+  });
+
+  it("still takes a value the page hands straight back as an echo", async () => {
+    const user = userEvent.setup();
+    const { form, host } = mount(`<ds-text-field label="F" name="f" value="Ada"></ds-text-field>`);
+    const input = screen.getByRole("textbox", { name: "F" });
+
+    await user.clear(input);
+    await user.type(input, "Grace");
+    host.setAttribute("value", "Grace");
+
+    form.reset();
+    await settled();
+    expect(payload(form), "an echo must not become the default").toBe("Ada");
+  });
+
+  it("keeps an indeterminate default across a click on <ds-checkbox>", async () => {
+    const user = userEvent.setup();
+    const { form } = mount(
+      `<ds-checkbox label="F" name="f" value="on" indeterminate></ds-checkbox>`,
+    );
+    const box = () => screen.getByRole("checkbox", { name: "F" }) as HTMLInputElement;
+    expect(box().indeterminate).toBe(true);
+
+    // Clicking an indeterminate box checks it and clears the third state. The
+    // two attributes that hold that state are written one after the other, and
+    // the moment between them is not a state the page ever asked for.
+    await user.click(box());
+    form.reset();
+    await settled();
+
+    expect(box().indeterminate, "the third state was the default, and must come back").toBe(true);
+    expect(payload(form)).toBe(null);
+  });
+
+  it("leaves the selection alone when <ds-select> is given its list again", async () => {
+    const user = userEvent.setup();
+    const { form, host } = mount(
+      `<ds-select label="F" name="f" value="pear">${options}</ds-select>`,
+    );
+    const select = () => screen.getByRole("combobox", { name: "F" }) as HTMLSelectElement;
+    await user.selectOptions(select(), "apple");
+
+    // A rebuilt list starts with no option marked as chosen, so writing the
+    // defaults into it moves the selection unless the value is asserted after.
+    (host as unknown as { items: { value: string; label: string }[] }).items = [
+      { value: "apple", label: "Apple" },
+      { value: "pear", label: "Pear" },
+    ];
+
+    expect(select().value, "the list rebuild moved the selection").toBe("apple");
+    expect(payload(form), "the form would submit a value nobody chose").toBe("apple");
+    expect((host as unknown as { value: string | null }).value).toBe("apple");
+  });
+
+  it("clears the query <ds-multi-select> was typing when the form resets", async () => {
+    const user = userEvent.setup();
+    const { form } = mount(
+      `<ds-multi-select label="F" name="f" values="pear">${options}</ds-multi-select>`,
+    );
+    const input = screen.getByRole("combobox", { name: "F" }) as HTMLInputElement;
+
+    await user.click(input);
+    await user.keyboard("App");
+    expect(input.value).toBe("App");
+
+    form.reset();
+    // The browser empties the box as part of the reset; the restore that
+    // follows must not type the query back into it.
+    expect(input.value, "the browser's own reset must have emptied it").toBe("");
+    await settled();
+    expect(input.value, "the restore typed the query back in").toBe("");
+    expect(payload(form)).toBe("pear");
+  });
+});
+
+// The public property is the other way a page writes these controls, and the
+// combobox keeps one more piece of state than the others.
+describe("the current default through the other public paths", () => {
+  it("takes a value set through the property as the page's own choice", async () => {
+    const user = userEvent.setup();
+    const { form, host } = mount(`<ds-text-field label="F" name="f" value="Ada"></ds-text-field>`);
+    const input = screen.getByRole("textbox", { name: "F" });
+
+    await user.clear(input);
+    await user.type(input, "Grace");
+    (host as unknown as { value: string }).value = "Hopper";
+
+    form.reset();
+    await settled();
+    expect(payload(form), "a write through the property is a choice").toBe("Hopper");
+    expect(input.value).toBe("Hopper");
+  });
+
+  it("settles <ds-combobox> on what the reset put there, not on what it replaced", async () => {
+    const user = userEvent.setup();
+    const { form } = mount(`<ds-combobox label="F" name="f" value="pear">${options}</ds-combobox>`);
+    const input = () => screen.getByRole("combobox", { name: "F" }) as HTMLInputElement;
+
+    await user.click(input());
+    await user.click(within(screen.getByRole("listbox")).getByRole("option", { name: "Apple" }));
+    expect(input().value).toBe("Apple");
+
+    form.reset();
+    await settled();
+    expect(input().value).toBe("Pear");
+
+    // Escape abandons what is being typed and goes back to the selection the
+    // control last settled on. After a reset that is the restored one: the
+    // reset moved the whole of the control's state, not only what shows.
+    await user.click(input());
+    await user.keyboard("xyz");
+    await user.keyboard("{Escape}");
+    expect(input().value, "Escape went back to the value the reset undid").toBe("Pear");
+    expect(payload(form)).toBe("pear");
   });
 });

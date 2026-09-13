@@ -45,8 +45,6 @@ export class DsCheckboxGroup extends HTMLElementBase {
   #inputs = new Map<string, HTMLInputElement>();
   /** What a form reset restores: the last value set from outside. */
   #defaultValue: string[] = [];
-  /** The last value this control reported, so giving it back is not a change. */
-  #reported: string[] | null = null;
   #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
@@ -158,8 +156,9 @@ export class DsCheckboxGroup extends HTMLElementBase {
 
   /** Put the value back to the current default, telling nobody. */
   #restore() {
-    this.#reported = this.#defaultValue;
-    this.value = this.#defaultValue;
+    const restored = this.#defaultValue;
+    for (const [value, input] of this.#inputs) input.checked = restored.includes(value);
+    this.value = restored;
     this.#sync();
   }
 
@@ -167,9 +166,11 @@ export class DsCheckboxGroup extends HTMLElementBase {
     const fieldset = this.#fieldset!;
     const disabled = boolAttr(this, "disabled");
     // The default a reset restores follows the attribute, except when it only
-    // hands back what this control itself reported.
+    // hands back what the control already shows: that is the page echoing a
+    // click, and an echo is not a new default (ADR 0012).
     const value = this.value;
-    if (!sameValues(value, this.#reported)) this.#defaultValue = value;
+    const shown = [...this.#inputs].filter(([, input]) => input.checked).map(([item]) => item);
+    if (!sameValues(value, shown)) this.#defaultValue = value;
 
     this.#legend!.textContent = this.getAttribute("label") ?? "";
 
@@ -177,7 +178,6 @@ export class DsCheckboxGroup extends HTMLElementBase {
       state: core.initialState({ items: this.#items, value: this.value, disabled }),
       name: this.getAttribute("name") ?? undefined,
       setValue: (next) => {
-        this.#reported = next;
         this.value = next;
         emit(this, "change", { value: next });
       },
