@@ -5,6 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Elements adapter harness</title>
   </head>
+  <style>
+    /* The reset section has to fit a 320px viewport beside everything else:
+         the field width is a token for exactly this, and the fields here have
+         no room for their 18rem default. */
+    [data-testid="reset-form"] {
+      --ds-field-width: 100%;
+      display: grid;
+      gap: 0.75rem;
+      justify-items: start;
+      inline-size: 100%;
+      max-inline-size: 16rem;
+    }
+  </style>
   <body>
     <main style="display: grid; gap: 1rem; justify-items: start; padding: 2rem">
       <h1>Elements adapter harness</h1>
