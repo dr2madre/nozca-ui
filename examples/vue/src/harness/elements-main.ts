@@ -31,3 +31,36 @@ document.querySelector("[data-testid='reflect']")!.addEventListener("click", () 
   host.values = ["elements", "svelte"];
   renderValues();
 });
+
+// The reset section (ADR 0012). Everything here is the consumer's side of the
+// contract: the form's own reset event, and a count of what the controls say.
+const resetForm = document.querySelector("[data-testid='reset-form']") as HTMLFormElement;
+const resetReadout = document.querySelector("[data-testid='reset-readout']")!;
+const resetPayload = document.querySelector("[data-testid='reset-payload']")!;
+let resets = 0;
+let reports = 0;
+
+const renderResetReadout = () => {
+  resetReadout.textContent = `Resets: ${resets}. Reports: ${reports}.`;
+};
+
+for (const type of ["change", "input"] as const) {
+  resetForm.addEventListener(type, () => {
+    reports += 1;
+    renderResetReadout();
+  });
+}
+
+resetForm.addEventListener("reset", () => {
+  resets += 1;
+  renderResetReadout();
+});
+
+resetForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const data = new FormData(resetForm);
+  resetPayload.textContent = `Payload: ${[...data.keys()]
+    .filter((key, index, keys) => keys.indexOf(key) === index)
+    .map((key) => `${key}=${data.getAll(key).join("|")}`)
+    .join(", ")}`;
+});
