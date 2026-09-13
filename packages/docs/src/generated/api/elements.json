@@ -31,12 +31,12 @@
     {
       "name": "DsCheckbox",
       "kind": "class",
-      "signature": "declare class DsCheckbox extends HTMLElementBase { #private; static observedAttributes: string[]; connectedCallback(): void; attributeChangedCallback(): void; get checked(): checkbox.CheckedState; set checked(value: checkbox.CheckedState); }"
+      "signature": "declare class DsCheckbox extends HTMLElementBase { #private; static observedAttributes: string[]; connectedCallback(): void; disconnectedCallback(): void; attributeChangedCallback(): void; get checked(): checkbox.CheckedState; set checked(value: checkbox.CheckedState); }"
     },
     {
       "name": "DsCheckboxGroup",
       "kind": "class",
-      "signature": "declare class DsCheckboxGroup extends HTMLElementBase { #private; static observedAttributes: string[]; connectedCallback(): void; attributeChangedCallback(): void; get value(): string[]; set value(next: string[]); get items(): checkboxGroup.CheckboxGroupItem[]; set items(items: checkboxGroup.CheckboxGroupItem[]); }"
+      "signature": "declare class DsCheckboxGroup extends HTMLElementBase { #private; static observedAttributes: string[]; connectedCallback(): void; disconnectedCallback(): void; attributeChangedCallback(): void; get value(): string[]; set value(next: string[]); get items(): checkboxGroup.CheckboxGroupItem[]; set items(items: checkboxGroup.CheckboxGroupItem[]); }"
     },
     {
       "name": "DsCombobox",
@@ -66,17 +66,17 @@
     {
       "name": "DsRadioGroup",
       "kind": "class",
-      "signature": "declare class DsRadioGroup extends HTMLElementBase { #private; static observedAttributes: string[]; connectedCallback(): void; attributeChangedCallback(): void; get value(): string | null; set value(next: string | null); get items(): RadioGroupItem[]; set items(items: RadioGroupItem[]); }"
+      "signature": "declare class DsRadioGroup extends HTMLElementBase { #private; static observedAttributes: string[]; connectedCallback(): void; disconnectedCallback(): void; attributeChangedCallback(): void; get value(): string | null; set value(next: string | null); get items(): RadioGroupItem[]; set items(items: RadioGroupItem[]); }"
     },
     {
       "name": "DsSelect",
       "kind": "class",
-      "signature": "declare class DsSelect extends HTMLElementBase { #private; static observedAttributes: string[]; connectedCallback(): void; attributeChangedCallback(): void; get value(): string | null; set value(next: string | null); get items(): SelectItem[]; set items(items: SelectItem[]); }"
+      "signature": "declare class DsSelect extends HTMLElementBase { #private; static observedAttributes: string[]; connectedCallback(): void; disconnectedCallback(): void; attributeChangedCallback(): void; get value(): string | null; set value(next: string | null); get items(): SelectItem[]; set items(items: SelectItem[]); }"
     },
     {
       "name": "DsSwitch",
       "kind": "class",
-      "signature": "declare class DsSwitch extends HTMLElementBase { #private; static observedAttributes: string[]; connectedCallback(): void; attributeChangedCallback(): void; get checked(): boolean; set checked(value: boolean); }"
+      "signature": "declare class DsSwitch extends HTMLElementBase { #private; static observedAttributes: string[]; connectedCallback(): void; disconnectedCallback(): void; attributeChangedCallback(): void; get checked(): boolean; set checked(value: boolean); }"
     },
     {
       "name": "DsTextField",
