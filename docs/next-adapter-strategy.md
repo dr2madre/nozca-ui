@@ -130,13 +130,15 @@ recorded in `docs/adr/0008-web-components-adapter.md`.
    framework adapters ("demand-driven, core stays untouched").
 
 **Closed: form reset (ADR 0012).** The elements now carry real DOM defaults
-and put their own state back on their owner's `reset`, silently, across all
-eight form-bearing families (`ds-text-field`, `ds-textarea`, `ds-checkbox`,
+and put their own state back on their owner's `reset`, silently, across every
+form-bearing element: eight families in nine tags, since `ds-text-field` and
+`ds-textarea` are one implementation with two elements (`ds-checkbox`,
 `ds-switch`, `ds-select`, `ds-radio-group`, `ds-checkbox-group`,
-`ds-combobox`, `ds-multi-select`). The two layers are the same ones the other
-adapters use, over the same `core` helper (`formReset.onFormReset`).
+`ds-combobox`, `ds-multi-select` are the rest). The two layers are the same
+ones the other adapters use, over the same `core` helper
+(`formReset.onFormReset`).
 
-What it was before: six of the eight created a real native control and wrote
+What it was before: seven of the nine created a real native control and wrote
 its value as a property, so a reset found a default of `""` and **emptied a
 field nobody had touched**, which is worse than not restoring; the combobox
 and the multi select submit through a hidden input, which a native reset never

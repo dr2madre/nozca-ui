@@ -112,9 +112,10 @@ single deferral is enough to see whether the reset was cancelled.
 
 ## Which adapters do this
 
-Svelte, Vue and the custom elements. In the elements the attribute you set is
-the current default, and it follows the same rule: a value handed back to the
-control while it still holds it is an echo, not a new default.
+Svelte, Vue and the custom elements. In the elements the value you set, as an
+attribute or through the property, is the current default, and it follows the
+same rule as everywhere else: a value handed back to a control that already
+holds it is an echo, not a new default.
 
 The contract is binding on every adapter (ADR 0012), and the React package
 **has not implemented it yet**. What it does today is uneven, which is the
