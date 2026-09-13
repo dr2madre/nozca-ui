@@ -75,11 +75,11 @@
 
 .multi-select__listbox {
   position: fixed;
-  z-index: var(
-    --ds-elevation-overlay,
-    0 10px 15px -3px rgb(0 0 0 / 0.1),
-    0 4px 6px -4px rgb(0 0 0 / 0.1)
-  );
+  /* A stacking order, not a shadow: this used to be handed the overlay
+     elevation token, which is a box-shadow, so the browser threw the whole
+     declaration away and the open list had no stacking order at all. The
+     combobox next door has always used this one. */
+  z-index: var(--ds-select-z-index, 50);
   margin: 0;
   padding: 0.25rem;
   list-style: none;
