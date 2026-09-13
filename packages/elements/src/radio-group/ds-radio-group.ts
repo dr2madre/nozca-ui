@@ -7,6 +7,7 @@ import {
   nextId,
   upgradeProperty,
 } from "../internal/base";
+import { watchFormReset } from "../internal/form-reset";
 
 /** A radio in the group. The label is what the item shows. */
 export type RadioGroupItem = core.RadioItem & { label: string };
@@ -46,12 +47,25 @@ export class DsRadioGroup extends HTMLElementBase {
   #itemsAssigned = false;
   #inputs = new Map<string, HTMLInputElement>();
   #labelId = nextId("ds-radio-group-label");
+  /** What a form reset restores: the last value set from outside. */
+  #defaultValue: string | null = null;
+  #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
     upgradeProperty(this, "value");
     upgradeProperty(this, "items");
     if (!this.#group) this.#render();
     this.#sync();
+    this.#stopFormReset ??= watchFormReset(
+      this,
+      () => this.#inputs.values().next().value ?? null,
+      () => this.#restore(),
+    );
+  }
+
+  disconnectedCallback() {
+    this.#stopFormReset?.();
+    this.#stopFormReset = null;
   }
 
   attributeChangedCallback() {
@@ -140,9 +154,22 @@ export class DsRadioGroup extends HTMLElementBase {
     }
   }
 
+  /** Put the value back to the current default, telling nobody. */
+  #restore() {
+    const restored = this.#defaultValue;
+    for (const [value, input] of this.#inputs) input.checked = value === restored;
+    this.value = restored;
+    this.#sync();
+  }
+
   #sync() {
     const group = this.#group!;
     const disabled = boolAttr(this, "disabled");
+    // The default a reset restores follows the attribute, except when it only
+    // hands back what the control already shows: that is the page echoing a
+    // choice, and an echo is not a new default (ADR 0012).
+    const shown = [...this.#inputs].find(([, input]) => input.checked)?.[0] ?? null;
+    if (this.value !== shown) this.#defaultValue = this.value;
     const orientation =
       this.getAttribute("orientation") === "horizontal" ? "horizontal" : "vertical";
 
@@ -170,6 +197,9 @@ export class DsRadioGroup extends HTMLElementBase {
       const input = this.#inputs.get(item.value)!;
       applyProps(input, api.getItemProps(item.value));
       input.checked = api.value === item.value;
+      // The real DOM default, so the browser's own reset works and so does one
+      // in markup the script never reaches.
+      input.defaultChecked = this.#defaultValue === item.value;
       input.closest("label")?.classList.toggle("radio--disabled", disabled || !!item.disabled);
     }
   }

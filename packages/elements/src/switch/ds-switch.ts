@@ -1,5 +1,6 @@
 import { switchControl as core } from "@design-system/core";
 import { applyProps, boolAttr, emit, HTMLElementBase, upgradeProperty } from "../internal/base";
+import { watchFormReset } from "../internal/form-reset";
 
 /**
  * `<ds-switch>` — the styled switch as a custom element.
@@ -29,11 +30,24 @@ export class DsSwitch extends HTMLElementBase {
   #input: HTMLInputElement | null = null;
   #track: HTMLSpanElement | null = null;
   #text: HTMLSpanElement | null = null;
+  /** What a form reset restores: the last state set from outside. */
+  #defaultChecked = false;
+  #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
     upgradeProperty(this, "checked");
     if (!this.#input) this.#render();
     this.#sync();
+    this.#stopFormReset ??= watchFormReset(
+      this,
+      () => this.#input,
+      () => this.#restore(),
+    );
+  }
+
+  disconnectedCallback() {
+    this.#stopFormReset?.();
+    this.#stopFormReset = null;
   }
 
   attributeChangedCallback() {
@@ -70,9 +84,21 @@ export class DsSwitch extends HTMLElementBase {
     this.#text = text;
   }
 
+  /** Put the state back to the current default, telling nobody. */
+  #restore() {
+    const restored = this.#defaultChecked;
+    if (this.#input) this.#input.checked = restored;
+    this.checked = restored;
+    this.#sync();
+  }
+
   #sync() {
     const input = this.#input!;
     const disabled = boolAttr(this, "disabled");
+    // The default a reset restores follows the attribute, except when it only
+    // hands back what the control already shows: that is the page echoing a
+    // click, and an echo is not a new default (ADR 0012).
+    if (this.checked !== input.checked) this.#defaultChecked = this.checked;
     input.closest("label")?.classList.toggle("field--disabled", disabled);
 
     const name = this.getAttribute("name");
@@ -108,5 +134,8 @@ export class DsSwitch extends HTMLElementBase {
 
     applyProps(input, api.rootProps);
     input.checked = api.checked;
+    // The real DOM default, so the browser's own reset works and so does one
+    // in markup the script never reaches.
+    input.defaultChecked = this.#defaultChecked;
   }
 }

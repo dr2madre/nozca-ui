@@ -7,6 +7,7 @@ import {
   HTMLElementBase,
   upgradeProperty,
 } from "../internal/base";
+import { watchFormReset } from "../internal/form-reset";
 import { checkIcon, dashIcon } from "../internal/icons";
 
 /**
@@ -36,15 +37,33 @@ export class DsCheckbox extends HTMLElementBase {
 
   #input: HTMLInputElement | null = null;
   #text: HTMLSpanElement | null = null;
+  /** What a form reset restores: the last state set from outside. */
+  #defaultChecked: core.CheckedState = false;
+  /** Set while the two state attributes are written as one change. */
+  #writing = false;
+  #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
     upgradeProperty(this, "checked");
     if (!this.#input) this.#render();
     this.#sync();
+    this.#stopFormReset ??= watchFormReset(
+      this,
+      () => this.#input,
+      () => this.#restore(),
+    );
+  }
+
+  disconnectedCallback() {
+    this.#stopFormReset?.();
+    this.#stopFormReset = null;
   }
 
   attributeChangedCallback() {
-    if (this.#input) this.#sync();
+    // `checked` and `indeterminate` are two attributes holding one state, so
+    // the sync waits for both: halfway through, the element is in a state
+    // nobody asked for.
+    if (this.#input && !this.#writing) this.#sync();
   }
 
   get checked(): core.CheckedState {
@@ -52,8 +71,11 @@ export class DsCheckbox extends HTMLElementBase {
     return boolAttr(this, "checked");
   }
   set checked(value: core.CheckedState) {
+    this.#writing = true;
     this.toggleAttribute("indeterminate", value === "indeterminate");
     this.toggleAttribute("checked", value === true);
+    this.#writing = false;
+    if (this.#input) this.#sync();
   }
 
   #render() {
@@ -83,9 +105,26 @@ export class DsCheckbox extends HTMLElementBase {
     this.#text = text;
   }
 
+  /** Put the state back to the current default, telling nobody. */
+  #restore() {
+    const restored = this.#defaultChecked;
+    const input = this.#input;
+    if (input) {
+      input.checked = restored === true;
+      input.indeterminate = restored === "indeterminate";
+    }
+    this.checked = restored;
+    this.#sync();
+  }
+
   #sync() {
     const input = this.#input!;
     const disabled = boolAttr(this, "disabled");
+    // The default a reset restores follows the attributes, except when they
+    // only hand back what the control already shows: that is the page echoing
+    // a click, and an echo is not a new default (ADR 0012).
+    const shown: core.CheckedState = input.indeterminate ? "indeterminate" : input.checked;
+    if (this.checked !== shown) this.#defaultChecked = this.checked;
     input.closest("label")?.classList.toggle("field--disabled", disabled);
 
     for (const attr of ["name", "value"] as const) {
@@ -107,5 +146,8 @@ export class DsCheckbox extends HTMLElementBase {
     applyProps(input, api.rootProps);
     applyDomProps(input, api.rootDomProps);
     input.checked = api.checked === true;
+    // The real DOM default, so the browser's own reset works and so does one
+    // in markup the script never reaches.
+    input.defaultChecked = this.#defaultChecked === true;
   }
 }

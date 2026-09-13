@@ -1,6 +1,7 @@
 import { multiSelect as core } from "@design-system/core";
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { applyProps, boolAttr, emit, HTMLElementBase, upgradeProperty } from "../internal/base";
+import { watchFormReset } from "../internal/form-reset";
 import { checkIcon } from "../internal/icons";
 
 export interface MultiSelectItem {
@@ -16,6 +17,10 @@ const defaultFilter = (items: MultiSelectItem[], query: string) => {
 };
 
 const labelOf = (item: MultiSelectItem) => item.label ?? item.value;
+
+/** Same values in the same order. */
+const sameValues = (a: string[], b: string[] | null) =>
+  b != null && a.length === b.length && a.every((value, index) => value === b[index]);
 
 const parseValues = (attr: string | null): string[] =>
   attr ? attr.split(/\s+/).filter(Boolean) : [];
@@ -78,6 +83,9 @@ export class DsMultiSelect extends HTMLElementBase {
   #renderedValues: string[] | null = null;
   #renderedInert: boolean | null = null;
   #reflectingValues = false;
+  /** What a form reset restores: the last values set from outside. */
+  #defaultValues: string[] = [];
+  #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
     // Taken out of the page and put back while open (a server-driven swap, a
@@ -96,10 +104,17 @@ export class DsMultiSelect extends HTMLElementBase {
       const active = this.ownerDocument.activeElement;
       if (active === null || active === this.ownerDocument.body) this.#input?.focus();
     }
+    this.#stopFormReset ??= watchFormReset(
+      this,
+      () => this.#input,
+      () => this.#restore(),
+    );
   }
 
   disconnectedCallback() {
     this.#teardownOpen();
+    this.#stopFormReset?.();
+    this.#stopFormReset = null;
   }
 
   attributeChangedCallback() {
@@ -164,6 +179,8 @@ export class DsMultiSelect extends HTMLElementBase {
       activeValue: null,
       items: this.#filter(""),
     };
+    // The markup's values are the first default a reset can restore.
+    this.#defaultValues = this.#state.values;
     this.#id = core.initialState({ items: this.#all }).id;
 
     const root = document.createElement("div");
@@ -241,12 +258,14 @@ export class DsMultiSelect extends HTMLElementBase {
       },
       setValues: (values) => {
         // The attribute follows the selection, so a reconnect keeps it; one
-        // event carries the whole array.
+        // event carries the whole array. State first, then the attribute: the
+        // sync compares the two, and an attribute that matches the state is
+        // an echo rather than a new default.
+        this.#update({ values });
         this.#reflectingValues = true;
         if (values.length === 0) this.removeAttribute("values");
         else this.setAttribute("values", values.join(" "));
         this.#reflectingValues = false;
-        this.#update({ values });
         emit(this, "change", { values });
       },
       setOpen: (open) => this.#update({ open }),
@@ -440,8 +459,35 @@ export class DsMultiSelect extends HTMLElementBase {
     }
   }
 
+  /**
+   * Put the selection back to the current default, telling nobody. The values
+   * travel in hidden inputs, which a form reset leaves untouched, so the whole
+   * restore happens here.
+   */
+  #restore() {
+    const restored = this.#defaultValues;
+    this.#reflectingValues = true;
+    if (restored.length === 0) this.removeAttribute("values");
+    else this.setAttribute("values", restored.join(" "));
+    this.#reflectingValues = false;
+    // The query goes with the selection: the browser has just emptied the
+    // input, and re-asserting the old text would type it back in.
+    this.#update({
+      values: restored,
+      inputValue: "",
+      items: this.#filter(""),
+      activeValue: null,
+    });
+  }
+
   #syncFromAttributes() {
     this.#syncPresentation();
+
+    // The default a reset restores follows the attribute, except when it only
+    // hands back what the control already holds: that is the page echoing a
+    // selection, and an echo is not a new default (ADR 0012).
+    const declared = parseValues(this.getAttribute("values"));
+    if (!sameValues(declared, this.#state.values)) this.#defaultValues = declared;
 
     // A `values` attribute change from outside is a controlled reflection;
     // one this element just wrote is already in state.

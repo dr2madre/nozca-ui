@@ -1,6 +1,7 @@
 import { combobox as core } from "@design-system/core";
 import { autoUpdate, computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { applyProps, boolAttr, emit, HTMLElementBase, upgradeProperty } from "../internal/base";
+import { watchFormReset } from "../internal/form-reset";
 import { checkIcon, chevronIcon, closeIcon, pathIcon, searchIcon } from "../internal/icons";
 
 export interface ComboboxItem {
@@ -55,6 +56,9 @@ export class DsCombobox extends HTMLElementBase {
   #control: HTMLDivElement | null = null;
   #clear: HTMLButtonElement | null = null;
   #hidden: HTMLInputElement | null = null;
+  /** What a form reset restores: the last value set from outside. */
+  #defaultValue: string | null = null;
+  #stopFormReset: (() => void) | null = null;
   #root: HTMLDivElement | null = null;
   #label: HTMLLabelElement | null = null;
   #lead: HTMLSpanElement | null = null;
@@ -94,10 +98,17 @@ export class DsCombobox extends HTMLElementBase {
       const active = this.ownerDocument.activeElement;
       if (active === null || active === this.ownerDocument.body) this.#input?.focus();
     }
+    this.#stopFormReset ??= watchFormReset(
+      this,
+      () => this.#input,
+      () => this.#restore(),
+    );
   }
 
   disconnectedCallback() {
     this.#teardownOpen();
+    this.#stopFormReset?.();
+    this.#stopFormReset = null;
   }
 
   attributeChangedCallback() {
@@ -151,6 +162,8 @@ export class DsCombobox extends HTMLElementBase {
       activeValue: null,
       items: this.#filter(""),
     };
+    // The markup's value is the first default a reset can restore.
+    this.#defaultValue = this.getAttribute("value");
     this.#id = core.initialState({ items: this.#all }).id;
 
     const root = document.createElement("div");
@@ -287,6 +300,8 @@ export class DsCombobox extends HTMLElementBase {
         // next time the element reconnected.
         const item = value == null ? undefined : this.#all.find((i) => i.value === value);
         const text = item ? labelOf(item) : "";
+        // State first, then the attribute: the sync that follows compares the
+        // two, and an attribute that matches the state is an echo.
         this.#update({ value, inputValue: text, committedInputValue: text });
         if (value == null) this.removeAttribute("value");
         else this.setAttribute("value", value);
@@ -344,6 +359,11 @@ export class DsCombobox extends HTMLElementBase {
     this.#clear!.tabIndex = empty ? -1 : 0;
 
     if (this.#hidden) this.#hidden.value = this.#state.value ?? "";
+    // The text the browser's own reset puts back. The hidden input carrying
+    // the value has no default a reset can restore, so #restore does that
+    // part.
+    const fallback = this.#all.find((item) => item.value === this.#defaultValue);
+    input.defaultValue = fallback ? labelOf(fallback) : "";
 
     // Rebuild the option nodes only when the item list itself changed;
     // highlight/selection updates re-decorate the existing nodes in place, so
@@ -450,10 +470,32 @@ export class DsCombobox extends HTMLElementBase {
     }
   }
 
+  /**
+   * Put the selection back to the current default, telling nobody. The value
+   * travels in a hidden input, which a form reset leaves untouched, so the
+   * whole restore happens here.
+   */
+  #restore() {
+    const value = this.#defaultValue;
+    const item = value == null ? undefined : this.#all.find((i) => i.value === value);
+    const text = item ? labelOf(item) : "";
+    if (value == null) this.removeAttribute("value");
+    else this.setAttribute("value", value);
+    this.#update({
+      value: item ? item.value : null,
+      inputValue: text,
+      committedInputValue: text,
+    });
+  }
+
   #syncFromAttributes() {
     this.#syncPresentation();
 
     const attr = this.getAttribute("value");
+    // The default a reset restores follows the attribute, except when it only
+    // hands back what the control already holds: that is the page echoing a
+    // selection, and an echo is not a new default (ADR 0012).
+    if (attr !== this.#state.value) this.#defaultValue = attr;
     if (attr !== this.#state.value) {
       const item = this.#all.find((i) => i.value === attr);
       this.#update({

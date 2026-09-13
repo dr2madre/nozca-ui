@@ -112,12 +112,17 @@ single deferral is enough to see whether the reset was cancelled.
 
 ## Which adapters do this
 
-Svelte and Vue. The contract is binding on every adapter (ADR 0012), and the
-React and custom-element packages **have not implemented it yet**. What they
-do today is uneven, which is the reason not to rely on any of it: some of
-their controls happen to restore their payload, because the framework writes
-the attribute a native reset reads; none of them puts its own state back, so
-the control can submit one value while the component holds another; and the
-selects and the controls that submit through a hidden input restore nothing.
+Svelte, Vue and the custom elements. In the elements the value you set, as an
+attribute or through the property, is the current default, and it follows the
+same rule as everywhere else: a value handed back to a control that already
+holds it is an echo, not a new default.
+
+The contract is binding on every adapter (ADR 0012), and the React package
+**has not implemented it yet**. What it does today is uneven, which is the
+reason not to rely on any of it: some controls happen to restore their
+payload, because React writes the attribute a native reset reads; none of them
+puts its own state back, so a control can submit one value while the component
+holds another; and the selects and the controls that submit through a hidden
+input restore nothing.
 
 

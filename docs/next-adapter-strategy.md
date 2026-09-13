@@ -129,24 +129,36 @@ recorded in `docs/adr/0008-web-components-adapter.md`.
 4. **ADR 0008** records the outcome and the decision rule for further
    framework adapters ("demand-driven, core stays untouched").
 
-**Still open: form reset (ADR 0012).** The elements package does not reset
-yet, and the reason is the same one for all of them: none carries a DOM
-default a reset could restore. Six of the eight form-bearing elements create a
-real native control and write its value as a property, so a reset finds a
-default of `""` and **empties a field nobody touched**, which is worse than
-not restoring. The other two, the combobox and the multi select, submit
-through a hidden input, which a native reset never touches, so their payload
-survives a reset the user asked for.
+**Closed: form reset (ADR 0012).** The elements now carry real DOM defaults
+and put their own state back on their owner's `reset`, silently, across every
+form-bearing element: eight families in nine tags, since `ds-text-field` and
+`ds-textarea` are one implementation with two elements (`ds-checkbox`,
+`ds-switch`, `ds-select`, `ds-radio-group`, `ds-checkbox-group`,
+`ds-combobox`, `ds-multi-select` are the rest). The two layers are the same
+ones the other adapters use, over the same `core` helper
+(`formReset.onFormReset`).
 
-The contract is binding, so this is a gap in form participation, not a
-nice-to-have: the elements are not form-equivalent until each one carries a
-default that follows its attribute and puts its own state back on its owner's
-`reset` event, silently. Point 3's `ElementInternals` route is the interesting
-one here: a **form-associated** custom element (`static formAssociated = true`
-plus `attachInternals()`) gets a `formResetCallback` lifecycle hook, which the
-other adapters have no equivalent of. `setFormValue` is the separate method on
-the same object for supplying the submission value; the gate for the hook is
-`formAssociated`, not that call.
+What it was before: seven of the nine created a real native control and wrote
+its value as a property, so a reset found a default of `""` and **emptied a
+field nobody had touched**, which is worse than not restoring; the combobox
+and the multi select submit through a hidden input, which a native reset never
+touches, so their payload survived a reset the user asked for.
+
+**`ElementInternals.formResetCallback` was measured and not taken.** The hook
+itself is excellent: in Chromium, Firefox and WebKit alike it runs *after* the
+browser has restored the other controls, and a cancelled reset never calls it
+at all, so it needs none of the deferral the document-level listener does.
+The cost is what `static formAssociated = true` does to the host. The host
+joins `form.elements`, and because these elements carry the control's `name`
+on the host and forward it to the native control inside, `form.elements.myField`
+stops being that control and becomes a `RadioNodeList` of the host and the
+control, whose `.value` is `""`. Identical in the three engines. Consumer code
+as ordinary as `form.elements.email.value` would start reading an empty
+string, silently, and nothing in the package would report it. Form
+participation here comes from a real native control in light DOM, which is
+what makes that possible, so the hook cannot be adopted without giving that
+up. If the elements ever supply their submission value through
+`setFormValue`, the hook comes with it and should be taken then.
 
 ## Sources
 

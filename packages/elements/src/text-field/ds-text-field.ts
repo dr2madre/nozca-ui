@@ -1,5 +1,6 @@
 import { textField as core } from "@design-system/core";
 import { applyProps, boolAttr, emit, HTMLElementBase, upgradeProperty } from "../internal/base";
+import { watchFormReset } from "../internal/form-reset";
 import { hazardIcon, successIcon } from "../internal/icons";
 
 /** Tracks what a message paragraph last rendered, so an unrelated sync (a
@@ -38,6 +39,9 @@ abstract class DsTextControl extends HTMLElementBase {
   #description: HTMLParagraphElement | null = null;
   #message: HTMLParagraphElement | null = null;
   #fieldId: string | null = null;
+  /** What a form reset restores: the last value set from outside. */
+  #defaultValue = "";
+  #stopFormReset: (() => void) | null = null;
 
   /** The control element this field wraps. */
   protected abstract createControl(): HTMLInputElement | HTMLTextAreaElement;
@@ -52,6 +56,16 @@ abstract class DsTextControl extends HTMLElementBase {
     upgradeProperty(this, "value");
     if (!this.#root) this.#render();
     this.#sync();
+    this.#stopFormReset ??= watchFormReset(
+      this,
+      () => this.#control,
+      () => this.#restore(),
+    );
+  }
+
+  disconnectedCallback() {
+    this.#stopFormReset?.();
+    this.#stopFormReset = null;
   }
 
   attributeChangedCallback() {
@@ -62,8 +76,10 @@ abstract class DsTextControl extends HTMLElementBase {
     return this.#control?.value ?? this.getAttribute("value") ?? "";
   }
   set value(next: string) {
-    if (this.#control) this.#control.value = next;
+    // The attribute first: the sync that follows compares it against what the
+    // control holds, and writing the control first would look like an echo.
     this.setAttribute("value", next);
+    if (this.#control) this.#control.value = next;
   }
 
   #render() {
@@ -76,6 +92,7 @@ abstract class DsTextControl extends HTMLElementBase {
     const control = this.createControl();
     control.className = "field__control";
     control.value = this.getAttribute("value") ?? "";
+    this.#defaultValue = control.value;
     // The host re-emits a CustomEvent with a typed detail; stop the native
     // events here so listeners on the host don't receive them twice.
     for (const type of ["input", "change"] as const) {
@@ -112,6 +129,10 @@ abstract class DsTextControl extends HTMLElementBase {
     const disabled = boolAttr(this, "disabled");
     const readOnly = boolAttr(this, "readonly");
     const value = this.getAttribute("value") ?? "";
+    // The default a reset restores follows the attribute, except when the
+    // attribute only hands back what the control already holds: that is the
+    // page echoing an edit, and an echo is not a new default (ADR 0012).
+    if (value !== control.value) this.#defaultValue = value;
 
     root.classList.toggle(`${this.rootClass}--disabled`, disabled);
     root.classList.toggle(`${this.rootClass}--success`, Boolean(success) && !error);
@@ -151,6 +172,9 @@ abstract class DsTextControl extends HTMLElementBase {
     // The attribute is the source of truth: typing writes it back, so this
     // only moves the control when the page sets the attribute itself.
     if (control.value !== value) control.value = value;
+    // The real DOM default, so the browser's own reset works and so does one
+    // in markup the script never reaches.
+    control.defaultValue = this.#defaultValue;
 
     this.#description = this.#paragraph(
       this.#description,
@@ -170,6 +194,14 @@ abstract class DsTextControl extends HTMLElementBase {
     // keeps description before error/success even when error was set first.
     if (this.#description) root.appendChild(this.#description);
     if (this.#message) root.appendChild(this.#message);
+  }
+
+  /** Put the value back to the current default, telling nobody. */
+  #restore() {
+    const restored = this.#defaultValue;
+    if (this.#control) this.#control.value = restored;
+    this.setAttribute("value", restored);
+    this.#sync();
   }
 
   #paragraph(

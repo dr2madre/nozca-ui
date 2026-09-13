@@ -1,6 +1,11 @@
 import { checkboxGroup as core } from "@design-system/core";
 import { applyProps, boolAttr, emit, HTMLElementBase, upgradeProperty } from "../internal/base";
+import { watchFormReset } from "../internal/form-reset";
 import { checkIcon } from "../internal/icons";
+
+/** Same values in the same order. */
+const sameValues = (a: string[], b: string[] | null) =>
+  b != null && a.length === b.length && a.every((value, index) => value === b[index]);
 
 /**
  * `<ds-checkbox-group>` — several checkboxes under one legend, as a custom
@@ -38,12 +43,25 @@ export class DsCheckboxGroup extends HTMLElementBase {
   #items: core.CheckboxGroupItem[] = [];
   #itemsAssigned = false;
   #inputs = new Map<string, HTMLInputElement>();
+  /** What a form reset restores: the last value set from outside. */
+  #defaultValue: string[] = [];
+  #stopFormReset: (() => void) | null = null;
 
   connectedCallback() {
     upgradeProperty(this, "value");
     upgradeProperty(this, "items");
     if (!this.#fieldset) this.#render();
     this.#sync();
+    this.#stopFormReset ??= watchFormReset(
+      this,
+      () => this.#inputs.values().next().value ?? null,
+      () => this.#restore(),
+    );
+  }
+
+  disconnectedCallback() {
+    this.#stopFormReset?.();
+    this.#stopFormReset = null;
   }
 
   attributeChangedCallback() {
@@ -136,9 +154,23 @@ export class DsCheckboxGroup extends HTMLElementBase {
     }
   }
 
+  /** Put the value back to the current default, telling nobody. */
+  #restore() {
+    const restored = this.#defaultValue;
+    for (const [value, input] of this.#inputs) input.checked = restored.includes(value);
+    this.value = restored;
+    this.#sync();
+  }
+
   #sync() {
     const fieldset = this.#fieldset!;
     const disabled = boolAttr(this, "disabled");
+    // The default a reset restores follows the attribute, except when it only
+    // hands back what the control already shows: that is the page echoing a
+    // click, and an echo is not a new default (ADR 0012).
+    const value = this.value;
+    const shown = [...this.#inputs].filter(([, input]) => input.checked).map(([item]) => item);
+    if (!sameValues(value, shown)) this.#defaultValue = value;
 
     this.#legend!.textContent = this.getAttribute("label") ?? "";
 
@@ -157,6 +189,9 @@ export class DsCheckboxGroup extends HTMLElementBase {
       const input = this.#inputs.get(item.value)!;
       applyProps(input, api.getItemProps(item.value));
       input.checked = api.isChecked(item.value);
+      // The real DOM default, so the browser's own reset works and so does one
+      // in markup the script never reaches.
+      input.defaultChecked = this.#defaultValue.includes(item.value);
       input
         .closest("label")
         ?.classList.toggle("checkbox-group__item--disabled", disabled || !!item.disabled);

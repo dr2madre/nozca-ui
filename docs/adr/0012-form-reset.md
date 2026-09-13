@@ -12,14 +12,16 @@ not being implemented: the table says where it holds today.
 | Svelte | Implemented. |
 | Vue | Implemented. |
 | React | **Required, not implemented.** Its form controls do not reset yet. |
-| Elements | **Required, not implemented.** Same. |
+| Elements | Implemented. |
 | Any future adapter | Required before its form controls are called equivalent. |
 
 A package that has not implemented it must not be described as having form
 parity, and a control that submits a value is not finished until it resets.
-The requirement is carried in `docs/adapters-roadmap.md` (React),
-`docs/next-adapter-strategy.md` (Elements) and `docs/component-backlog.md`
-(adapter parity), so that a port cannot reach "done" without it.
+The requirement is carried in `docs/adapters-roadmap.md` (React) and
+`docs/component-backlog.md` (adapter parity), so that a port cannot reach
+"done" without it. `docs/next-adapter-strategy.md` records how the elements
+closed it, including why `ElementInternals.formResetCallback` was measured and
+not taken.
 
 ## Context
 
@@ -61,6 +63,10 @@ nothing.
   state back with the same no-notify writes the state conventions already use.
   A control that keeps none, like the standalone Radio, needs no listener: its
   element is its whole state, and the `checked` attribute is the restore.
+  A custom element keeps its own copy in an attribute, so it listens like the
+  rest: the browser puts the native control inside it back, and the element
+  puts that attribute back, or the next unrelated render would bring the edit
+  with it.
 - The restore puts the control's own copy of the value back too. A consumer
   using `bind:value` therefore ends the reset agreeing with the page; a
   consumer holding a separate copy still has to put that copy back, and the
